@@ -16,15 +16,32 @@ model User {
   createdAt DateTime  @default(now())
   messages  Message[]
   members   Member[]
+  ownedRooms Room[]   @relation("RoomOwner")
+  invites    Invite[]
 }
 
 model Room {
   id        String    @id @default(cuid())
   name      String    @unique
   description String?
+  ownerId   String
+  passwordHash String?
   createdAt DateTime  @default(now())
   messages  Message[]
   members   Member[]
+  owner     User      @relation("RoomOwner", fields: [ownerId], references: [id])
+  invites   Invite[]
+}
+
+model Invite {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  roomId    String
+  createdById String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdBy User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
 }
 
 model Member {

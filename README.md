@@ -36,6 +36,9 @@ Chat App API is a robust backend solution for real-time chat applications. It pr
 - ✅ **User Authentication** - Secure JWT-based authentication with bcryptjs password hashing
 - ✅ **Real-time Messaging** - Instant message delivery using WebSocket connections
 - ✅ **Chat Rooms** - Create and manage multiple chat room channels
+- ✅ **Room Security** - Optional password-protected rooms with bcrypt hashing
+- ✅ **Invite Links** - Owner-generated invite tokens with expiration
+- ✅ **Owner Controls** - Room owners can delete their channels
 - ✅ **User Presence** - Real-time online user tracking and status updates
 - ✅ **CORS Support** - Cross-origin resource sharing enabled for flexible client integration
 - ✅ **Type Safety** - Full TypeScript support with strict type checking
@@ -325,7 +328,8 @@ Content-Type: application/json
 
 {
   "name": "General Discussion",
-  "description": "A room for general discussions"
+  "description": "A room for general discussions",
+  "password": "optional-password"
 }
 ```
 
@@ -335,6 +339,8 @@ Content-Type: application/json
   "id": "room-id",
   "name": "General Discussion",
   "description": "A room for general discussions",
+  "ownerId": "user-id",
+  "hasPassword": true,
   "createdAt": "2026-02-22T10:30:00Z"
 }
 ```
@@ -352,6 +358,8 @@ Authorization: Bearer <jwt-token>
     "id": "room-id",
     "name": "General Discussion",
     "description": "A room for general discussions",
+    "ownerId": "user-id",
+    "hasPassword": false,
     "createdAt": "2026-02-22T10:30:00Z",
     "_count": {
       "members": 5,
@@ -361,9 +369,48 @@ Authorization: Bearer <jwt-token>
 ]
 ```
 
-#### Get Room Details
+#### Join Room
 ```http
-GET /api/rooms/:roomId
+POST /api/rooms/:roomId/join
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+
+{
+  "password": "optional-password",
+  "inviteToken": "optional-invite-token"
+}
+```
+
+**Response (200)**
+```json
+{
+  "message": "Joined room"
+}
+```
+
+#### Create Invite (Owner Only)
+```http
+POST /api/rooms/:roomId/invites
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+
+{
+  "expiresInDays": 3
+}
+```
+
+**Response (201)**
+```json
+{
+  "token": "invite-token",
+  "expiresAt": "2026-02-25T10:30:00Z",
+  "roomId": "room-id"
+}
+```
+
+#### Join By Invite
+```http
+POST /api/rooms/invites/:token/join
 Authorization: Bearer <jwt-token>
 ```
 
@@ -372,37 +419,27 @@ Authorization: Bearer <jwt-token>
 {
   "id": "room-id",
   "name": "General Discussion",
-  "description": "Room description",
+  "description": "A room for general discussions",
+  "ownerId": "user-id",
+  "hasPassword": true,
   "createdAt": "2026-02-22T10:30:00Z",
-  "members": [...],
-  "messages": [...]
+  "_count": {
+    "members": 5,
+    "messages": 42
+  }
 }
 ```
 
-#### Join Room
+#### Delete Room (Owner Only)
 ```http
-POST /api/rooms/:roomId/join
+DELETE /api/rooms/:roomId
 Authorization: Bearer <jwt-token>
 ```
 
 **Response (200)**
 ```json
 {
-  "message": "Successfully joined room",
-  "roomId": "room-id"
-}
-```
-
-#### Leave Room
-```http
-POST /api/rooms/:roomId/leave
-Authorization: Bearer <jwt-token>
-```
-
-**Response (200)**
-```json
-{
-  "message": "Successfully left room"
+  "message": "Room deleted"
 }
 ```
 
@@ -511,6 +548,8 @@ model User {
   createdAt DateTime  @default(now())                // Account creation timestamp
   messages  Message[]                                // Messages authored by user
   members   Member[]                                 // Rooms user is member of
+  ownedRooms Room[]                                  // Rooms owned by user
+  invites    Invite[]                                // Invites created by user
 }
 ```
 
@@ -520,10 +559,28 @@ model Room {
   id          String    @id @default(cuid())
   name        String    @unique                      // Unique room name
   description String?                                // Optional room description
+  ownerId     String                                 // Owner user id
+  passwordHash String?                               // Optional room password hash
   createdAt   DateTime  @default(now())
   messages    Message[]                              // Messages in room
   members     Member[]                               // Members in room
+  owner       User      @relation(fields: [ownerId], references: [id])
+  invites     Invite[]                               // Active invites for the room
 }
+
+### Invite Model
+```typescript
+model Invite {
+  id          String   @id @default(cuid())
+  token       String   @unique                       // Public invite token
+  roomId      String                                 // Target room
+  createdById String                                 // Creator user id
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime                               // Expiration timestamp
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+}
+```
 ```
 
 ### Member Model (Junction Table)
@@ -556,7 +613,9 @@ model Message {
 ### Relationships
 - **User ↔ Message**: One-to-Many (User authors multiple messages)
 - **User ↔ Room**: Many-to-Many (through Member junction table)
+- **User ↔ Room (Owner)**: One-to-Many (User owns rooms)
 - **Room ↔ Message**: One-to-Many (Room contains multiple messages)
+- **Room ↔ Invite**: One-to-Many (Room has multiple invites)
 
 ---
 
